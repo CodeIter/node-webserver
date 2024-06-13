@@ -1,0 +1,169 @@
+name: Publish Docker Image to Container Registry
+
+on:
+
+  push:
+
+    tags:
+      - 'v[0-9]+[0-9]+.[0-9]+'
+      - 'v[0-9]+[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+.[0-9]+'
+      - 'latest'
+      - '*alpha*'
+      - '*beta*'
+      - '*rc*'
+
+#    branches:
+#      - 'main'
+#      - '**'
+
+#  pull_request:
+
+#    branches:
+#      - 'main'
+#      - '**'
+
+  workflow_dispatch:
+
+jobs:
+
+  build-run-push-container:
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+
+      GITHUB_REGISTRY: ghcr.io
+      GITHUB_USERNAME: ${{ github.actor }}
+      GITHUB_TOKEN: secrets.CUSTOM_GITHUB_TOKEN || secrets.GITHUB_TOKEN
+
+      DOCKERHUB_REGISTRY: docker.io
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || github.actor }}
+      DOCKERHUB_TOKEN: secrets.DOCKERHUB_TOKEN
+
+      GITLAB_REGISTRY: registry.gitlab.com
+      GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME || github.actor }}
+      GITLAB_TOKEN: secrets.DOCKERHUB_TOKEN
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Determine Branch
+        id: branches
+        uses: transferwise/sanitize-branch-name@v1
+
+      - name: Echo branch name
+        run: |
+          echo "BRANCH_NAME=${{ steps.branches.outputs.branch-name }}" >> $GITHUB_OUTPUT
+          echo "SANITIZED_BRANCH_NAME=${{ steps.branches.outputs.sanitized-branch-name }}" >> $GITHUB_OUTPUT
+
+      - name: Determine tag
+        run: |
+          if    [[ "${GITHUB_REF}" == "refs/heads/main" ]] ; then
+            TAG="main"
+          elif [[ "${GITHUB_REF}" == "refs/tags/*" ]] ; then
+            TAG="${GITHUB_REF##*/}"
+          elif    [[ "${GITHUB_REF}" == "refs/heads/*" ]] ; then
+            TAG="${SANITIZED_BRANCH_NAME}"
+          fi
+          echo "TAG=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Detect if on pull request
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "PR=pr-" >> $GITHUB_OUTPUT
+          echo "PR2=-alpha" >> $GITHUB_OUTPUT
+
+      - name: Build the Docker image
+        run: |
+            docker build . \
+              --tag "${{ github.repository }}:${PR}${TAG}${PR2}"
+
+      - name: Run docker image
+        run: |
+          docker run "${{ github.repository }}:${PR}${TAG}${PR2}"
+
+      ################################################################
+
+      - name: Login to Github Container Registry
+        id: login_github_cr
+        uses: docker/login-action@v3
+        if: |
+          env.GITHUB_REGISTRY != '' &&
+          env.GITHUB_USERNAME != '' &&
+          env.GITHUB_TOKEN != ''
+        with:
+          registry: ${{ env.GITHUB_REGISTRY }}
+          username: ${{ env.GITHUB_USERNAME }}
+          password: ${{ env.GITHUB_TOKEN }}
+
+      - name: Publish to Github Container Registry
+        id: push_github_cr
+        if: |
+          steps.login_github_cr.conclusion == 'success' &&
+          env.GITHUB_REGISTRY != '' &&
+          env.GITHUB_USERNAME != '' &&
+          env.GITHUB_TOKEN != ''
+        run: |
+          IMAGE_NAME="${{ github.repository }}"
+          IMAGE_NAME="${IMAGE_NAME##*/}"
+          docker push "${GITHUB_REGISTRY}/${GITHUB_USERNAME}/${IMAGE_NAME}:${PR}${TAG}${PR2}"
+
+      ################################################################
+
+      - name: Login to Docker Hub Container Registry
+        id: login_dockerhub_cr
+        uses: docker/login-action@v3
+        if: |
+          env.DOCKERHUB_REGISTRY != '' &&
+          env.DOCKERHUB_USERNAME != '' &&
+          env.DOCKERHUB_TOKEN != ''
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Publish to Docker Hub Container Registry
+        id: push_dockerhub_cr
+        if: |
+          steps.login_dockerhub_cr.conclusion == 'success' &&
+          env.DOCKERHUB_REGISTRY != '' &&
+          env.DOCKERHUB_USERNAME != '' &&
+          env.DOCKERHUB_TOKEN != ''
+        run: |
+          IMAGE_NAME="${{ github.repository }}"
+          IMAGE_NAME="${IMAGE_NAME##*/}"
+          docker push "${DOCKERHUB_REGISTRY}/${GITHUB_USERNAME}/${IMAGE_NAME}:${PR}${TAG}${PR2}"
+
+      ################################################################
+
+      - name: Login to Gitlab Container Registry
+        id: login_gitlab_cr
+        uses: docker/login-action@v3
+        if: |
+          env.GITLAB_REGISTRY != '' &&
+          env.GITLAB_USERNAME != '' &&
+          env.GITLAB_TOKEN != ''
+        with:
+          registry: ${{ env.GITLAB_REGISTRY }}
+          username: ${{ env.GITLAB_USERNAME }}
+          password: ${{ env.GITLAB_TOKEN }}
+
+      - name: Publish to Gitlab Container Registry
+        id: push_gitlab_cr
+        if: |
+          steps.login_gitlab_cr.conclusion == 'success' &&
+          env.GITLAB_REGISTRY != '' &&
+          env.GITLAB_USERNAME != '' &&
+          env.GITLAB_TOKEN != ''
+        run: |
+          IMAGE_NAME="${{ github.repository }}"
+          IMAGE_NAME="${IMAGE_NAME##*/}"
+          docker push "${GITLAB_REGISTRY}/${GITHUB_USERNAME}/${IMAGE_NAME}:${PR}${TAG}${PR2}"
+

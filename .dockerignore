@@ -1,0 +1,14 @@
+# Docker Ignore
+# Ignore All, Include Exceptions
+
+**
+
+!LICENSE
+!README.md
+
+!package.json
+!pnpm-lock.yaml
+
+!index.js
+!server.js
+
